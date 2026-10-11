@@ -7,7 +7,8 @@
 - Every failed test (non-convergence, import error, timeout) is recorded
   with its tool, case, operation and real exception line, and written into
   the pytest-benchmark JSON under `failures`, so a report shows
-  `FAILED (IterationDiverge: ...)` instead of a missing cell.
+  `FAILED (IterationDiverge: ...)` instead of a missing cell; a timeout no
+  longer costs the other cases their records.
 - Tool metadata (version, dependencies, settings, tags, colour), the git
   commit and the cores the run could use (`cpus`, which scaling results
   depend on) are written once per JSON under `grid_bench`, so the report
@@ -56,7 +57,7 @@ def extract_error(text: str) -> str:
     lines = [re.sub(r"^E\s+", "", ln).strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln and "validate_input_data" not in ln and "validate_batch_data" not in ln]
     for ln in reversed(lines):
-        if re.match(r"^[\w.]+(Error|Exception|Warning|Diverge|Converge|Unsupported)\w*:\s", ln) or ln.startswith("Failed: Timeout"):
+        if re.match(r"^[\w.]+(Error|Exception|Warning|Diverge|Converge|Unsupported|NotRun)\w*:\s", ln) or ln.startswith("Failed: Timeout"):
             return re.sub(r"^(\w+\.)+(?=\w+:)", "", ln)[:300]   # drop the module path of the class
     return (lines[-1] if lines else "failed")[:300]
 
@@ -72,6 +73,11 @@ def pytest_runtest_makereport(item, call):
             "operation": item.originalname.removeprefix("test_"),
             "error": extract_error(report.longreprtext),
         } | ({"threads": item.callspec.params["threads"]} if "threads" in item.callspec.params else {}))
+        # A test stopped before its first timed round (a timeout) leaves pytest-benchmark a
+        # benchmark without one timing, on which writing the JSON fails and every other
+        # case of the run is lost. Its failure is recorded above; the empty benchmark goes.
+        bs = item.config._benchmarksession
+        bs.benchmarks[:] = [m for m in bs.benchmarks if m.stats]
 
 
 def pytest_benchmark_update_json(config, benchmarks, output_json):

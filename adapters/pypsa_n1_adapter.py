@@ -16,6 +16,13 @@ the branch set active again. One thread.
   1, or which has a phase shift, and a line of every other, numbered `T<i>`
   and `L<i>` in file order; the same rule on the prepared case (the input
   PyPSA reads), and every element's buses asserted against its row.
+
+Result: a loop of PyPSA's single solve, so case9241pegase#n1 takes about
+17 minutes per round on a Ryzen 7 250 and about 25 on an AMD EPYC 7J13,
+where its warm-up and timed round exceed the batch timeout (3600 s) and
+its memory measurement the import timeout (1800 s): both timed out there
+(2026-10-11), so it is not run any more (`too_slow`), saving about 1.5 h
+per run.
 """
 import numpy as np
 
@@ -34,6 +41,9 @@ class PypsaN1(LoopContingencyAdapter):
     language = PypsaAdapter.language
     modules = PypsaAdapter.modules
     settings = PypsaAdapter.settings | {"mode": "loop", "start": "base-case solution (use_seed)"}
+    too_slow = {"case9241pegase#n1": "one call takes about 25 min on an AMD EPYC 7J13 (17 on a Ryzen 7 250); "
+                                     "warm-up and timed round exceed the 3600 s timeout, the memory measurement "
+                                     "the 1800 s one (both timed out, 2026-10-11)"}
     single = PypsaAdapter()
 
     def load(self, case):

@@ -21,9 +21,17 @@ Settings:
 - `solve_batch(Sbus, V0, ...)` on the `nr_klu.Solver` that p3s's own
   `calculate_timeseries_cpp` builds (same Ybus arrays, PV and PQ sets), not
   that wrapper: it starts every step from a DC power flow
-  (`dc_initial_voltage`). `V0` here is the power-flow adapter's flat start
-  (setpoints at PV and slack buses, 1.0 p.u. and 0 degrees elsewhere), the
-  start of every scenario.
+  (`dc_initial_voltage`). `V0`, the start of every scenario, is the base
+  case's solution: the timed call first solves the base case through the
+  power-flow adapter's `solve` from its flat start (setpoints at PV and
+  slack buses, 1.0 p.u. and 0 degrees elsewhere) and passes its voltages,
+  as the N-1 adapter does. Known loss of that start, reported rather than
+  worked around: on mvlv1004#sweep 40 of the 100 scenarios (60 to 76 % of
+  the base load) do not converge in `MAX_ITERATIONS` from a base case
+  loaded down to 0.67 p.u.; all do with 200 iterations, and from the flat
+  start within 30 (as VeraGrid; the other tools converge from this start).
+  case9241pegase#sweep is rejected with the importer loss the power-flow
+  adapter documents.
 - `n_threads`: the thread count (p3s: 1 is serial; its default 0, every
   core, is never passed, so the count is always the one recorded). The
   image builds the extension with OpenMP (tool-configs/p3s/Dockerfile).
@@ -48,7 +56,7 @@ class P3sBatch(BatchAdapter):
     modules = P3sAdapter.modules + ("p3s.timeseries", "p3s.nr_klu")
     mode = "native"
     settings = P3sAdapter.settings | {"mode": "native", "batch_api": "nr_klu.Solver.solve_batch",
-                                      "init": "flat (V0 per scenario)", "n_threads": "the thread count (OpenMP)"}
+                                      "start": "base-case solution (V0)", "n_threads": "the thread count (OpenMP)"}
     single = P3sAdapter()
 
     def load(self, case):
@@ -64,12 +72,13 @@ class P3sBatch(BatchAdapter):
                                np.ascontiguousarray(y.data, dtype=np.complex128),
                                np.ascontiguousarray(npf.busses["pv"], dtype=np.int32),
                                np.ascontiguousarray(npf.busses["pq"], dtype=np.int32))
-        return {"solver": solver, "sbus": np.ascontiguousarray(sbus, dtype=np.complex128),
-                "v0": np.ascontiguousarray(model["v0"], dtype=np.complex128),
+        return {"solver": solver, "sbus": np.ascontiguousarray(sbus, dtype=np.complex128), "single": model,
                 "bus_ids": [str(int(i) + 1) for i in net.bus.old_index], "v": None}
 
     def solve(self, model, threads=1):
-        out = model["solver"].solve_batch(model["sbus"], model["v0"], max_iter=MAX_ITERATIONS, tol=TOLERANCE_PU,
+        self.single.solve(model["single"])
+        v0 = np.ascontiguousarray(model["single"]["v"], dtype=np.complex128)
+        out = model["solver"].solve_batch(model["sbus"], v0, max_iter=MAX_ITERATIONS, tol=TOLERANCE_PU,
                                           n_threads=threads, line_search=True)
         bad = int((~np.asarray(out["converged"], bool)).sum())
         if bad:

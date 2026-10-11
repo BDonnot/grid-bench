@@ -6,16 +6,19 @@ Contributor guide for grid-bench (people and coding agents alike).
 
 A benchmark of power system analysis software. v1 covers AC power flow for
 pandapower, p3s (pandapower's parallel solver, C++/KLU), lightsim2grid, PyPSA,
-power-grid-model, pypowsybl, VeraGrid, Sienna (PowerFlows.jl) and
-Sparlectra.jl (both Julia, through juliacall), MATPOWER (GNU Octave), and
-power-grid-model on CGMES through cgmes2pgm, and
+power-grid-model, pypowsybl, VeraGrid, Sienna (PowerFlows.jl), ExaPF.jl (on
+its CPU backend, and on its CUDA backend as `exapf_gpu`, which needs an
+NVIDIA GPU) and Sparlectra.jl (all Julia, through juliacall), MATPOWER (GNU Octave),
+gpusim2grid (lightsim2grid's GPU companion, CUDA and cuDSS, which needs an
+NVIDIA GPU), and power-grid-model on CGMES through cgmes2pgm, and
 weighted least-squares state estimation for pandapower, power-grid-model,
 VeraGrid and Sparlectra.jl, and AC optimal power flow for MATPOWER,
 pandapower, VeraGrid and PowerModels.jl (Ipopt; its own image, OPF only) on
 PGLib-OPF cases, and batch power flow (a sweep of operating points per case)
 for every tool that reads `.m`: through the tool's own batch API at 1..n
 threads (power-grid-model, p3s, lightsim2grid) or on one thread (PyPSA,
-VeraGrid, Sienna), or a loop of single solves (pandapower, pypowsybl,
+VeraGrid, Sienna, ExaPF.jl), or on one GPU (ExaPF.jl's CUDA backend,
+gpusim2grid), or a loop of single solves (pandapower, pypowsybl,
 Sparlectra.jl, MATPOWER), and N-1 contingency analysis for the same tools
 (200 branch outages per transmission case, through a native contingency API
 where there is one), and CIM libraries reading, writing and validating CGMES
@@ -52,14 +55,15 @@ settings, a tool-independent oracle).
    (`adapters/optimizer_adapter.py`): MATPOWER's formulation (polynomial
    cost; voltage, generator, branch MVA and angle-difference limits), flat
    start where settable, `OPF_TOLERANCE`. Batch power flow
-   (`adapters/batch_adapter.py`): every scenario the power-flow problem
-   (flat start per scenario, never the previous scenario's result), the
+   (`adapters/batch_adapter.py`): every scenario the power-flow problem,
+   started from the tool's own solution of the base case (solved from flat
+   start in the same timed call), never from another scenario's result, the
    tool's own thread setting with BLAS pinned to one thread, every scenario
    of every thread count graded. N-1 (`ContingencyAdapter`, same module):
-   the same, except that every outage starts from the tool's own solution
-   of the base case (solved from flat start in the same timed call), the
-   one exception to the flat start, as contingency analysis is done; a tool
-   that cannot start from it says what it does instead. CIM
+   the same, every outage started from the base-case solution, as
+   contingency analysis is done. These two are the exceptions to the flat
+   start; a tool that cannot start from the base case says what it does
+   instead. CIM
    (`adapters/cim_adapter.py`): every profile of the case as published,
    from the uncompressed XML; export warm, into an emptied directory;
    validate from files to report in one call, parsing included; cimoxide
@@ -109,6 +113,12 @@ tool-configs/<tool>/pyproject.toml   dependencies of each image (tools pinned ex
 tool-configs/matpower/Dockerfile      the official Octave image + uv Python + the MATPOWER release
 tool-configs/sienna/Dockerfile, julia/   Julia on top of the base image; Project.toml, Manifest.toml,
              setup.jl (registry snapshot), GridBenchSienna (the adapter's Julia half, precompiled)
+tool-configs/exapf/Dockerfile, julia/   the same for ExaPF.jl (GridBenchExaPF, CPU backend)
+tool-configs/exapf_gpu/Dockerfile, julia/   ExaPF.jl on CUDA: exapf's GridBenchExaPF plus CUDA.jl and
+             CUDSS.jl, the CUDA runtime fixed by LocalPreferences.toml (built without a GPU);
+             needs-gpu: left out of a default run_benchmark.sh sweep where nvidia-smi fails
+tool-configs/gpusim2grid/Dockerfile   compiles gpusim2grid (CUDA, cuDSS; not on PyPI) and the lightsim2grid
+             it is seeded from (with its C++ headers) from pinned sources; needs-gpu, like exapf_gpu
 tool-configs/sparlectra/Dockerfile, julia/   the same for Sparlectra.jl (GridBenchSparlectra, se.jl: estimation)
 tool-configs/p3s/Dockerfile           compiles p3s's C++/KLU extension (not on PyPI) from pinned sources,
              with OpenMP for its batch solver (libgomp from the same pinned gcc image)
@@ -121,7 +131,8 @@ tests/       the oracle's own tests (test_wls.py: state estimation, test_opf.py:
 data/        submodules: benchmark-grids (MATPOWER, PGLib-OPF), CGMES-Test-Configurations,
              application-profiles-library (ENTSO-E's CGMES RDFS and SHACL)
 results-docker/  published results: <tool>.json, <tool>-se.json, <tool>-opf.json, <tool>-batch.json, <tool>-n1.json,
-             <tool>-cim.json, conversion.json
+             <tool>-cim.json; gpu/: GPU tools and the CPU baselines run on their machine
+             (conversion.json, the conversion check's record, is written there but not tracked)
 docs/index.html  generated site
 ```
 
@@ -132,6 +143,7 @@ docker/build.sh [tool ...]                     # images (base, harness, tools)
 docker/lock.sh                                 # re-resolve every uv.lock and Julia Manifest.toml (review, then commit)
 docker/run_benchmark.sh [tool ...] [-- --groups smoke]   # prep, oracle tests, tools, reports
 docker/run_single.sh pandapower --cases case14,case300   # one tool, quick iteration
+GRID_BENCH_RESULTS=gpu docker/run_single.sh exapf_gpu    # into results-docker/gpu/ (GPU tabs); a baseline likewise
 docker compose -f docker/docker-compose.yml run --rm reports   # regenerate reports only
 
 ./setup.sh && ./run_benchmarks.sh [tool ...]   # native, one environment, for development
@@ -150,7 +162,8 @@ internal compose network; the run scripts stop the sidecar afterwards.
    `display_name`, `color` (the next unused slot in `tools/palette.py`, kept
    for life; all nine slots are taken, and a tenth tool needs a different
    encoding, not another hue, see the palette's docstring (p3s is
-   pandapower's blue, dashed: `P3S`); a reference implementation uses `REFERENCE`, drawn dashed; PowerModels.jl, PGLib-OPF's
+   pandapower's blue, dashed: `P3S`; ExaPF.jl is Sienna's red, dotted: `EXAPF`, and on a
+   GPU dash-dotted: `EXAPF_GPU`; gpusim2grid lightsim2grid's orange, dash-dotted: `GPUSIM2GRID`); a reference implementation uses `REFERENCE`, drawn dashed; PowerModels.jl, PGLib-OPF's
    reference solver, `REFERENCE_DOTTED`; the CIM libraries, which only
    share a chart with pypowsybl, slot hues dotted: `CIMOXIDE` etc.), `package`, `modules`
    (everything `load` and `solve` import, for the memory baseline), `language`,
@@ -183,8 +196,8 @@ internal compose network; the run scripts stop the sidecar afterwards.
    feasible to about 1e-4 MVA and 9e-6 below PGLib's rounded reference.
    Batch power flow the same way: `adapters/<tool>_batch_adapter.py` on
    `BatchAdapter` (a native batch API, timed per thread count) or
-   `LoopBatchAdapter` (the power-flow adapter's solve per scenario, one
-   thread), in `BATCHES`, `create_benchmarks("<tool>", "batch")`,
+   `LoopBatchAdapter` (the base case, then every scenario from its solution
+   on the power-flow adapter's model, one thread), in `BATCHES`, `create_benchmarks("<tool>", "batch")`,
    `<tool>-batch.json`. Scenarios are joined by bus number and gen row. On
    `case14#sweep` a correct tool shows residuals around 1e-9 MVA on all 100
    scenarios, at every thread count. N-1 likewise: `<tool>_n1_adapter.py`
@@ -270,6 +283,12 @@ change to `tools/`, and commit what it writes. Conventions:
   Memory, the last with its own selector: import, import + export,
   validate, each measured in a fresh process by `adapters/memory.py`); its scoreboard is "done of all" per operation, and in place of
   the accuracy table it shows what each tool read and found, ungraded.
+- GPU tabs (power flow, batch, N-1) read `results-docker/gpu/`, not the
+  top level: GPU tools and the CPU baselines run on the same machine, which
+  need not be the machine behind the other tabs, so they are compared only
+  with each other. A tool is a GPU tool when its JSON records a device
+  (`dependencies.gpu`); every other tool there is a baseline. Run both
+  with `GRID_BENCH_RESULTS=gpu`.
 
 ## Adding a case
 
@@ -291,11 +310,15 @@ the native path), Julia by the official image's digest and Julia packages by
 registry at a commit at least 7 days old (`REGISTRY_COMMIT` in `setup.jl`;
 move it forward deliberately, like `exclude-newer`; the one exception is
 sparlectra, pinned to its newest release on purpose, see its `setup.jl`;
-p3s likewise, through `exclude-newer-package` in its `pyproject.toml`),
+p3s likewise, through `exclude-newer-package` in its `pyproject.toml`,
+and gpusim2grid, which has no release, at the newest commit of its main
+branch, see its Dockerfile),
 the Fuseki jar by SHA-256 (`docker/fuseki/Dockerfile`), GNU Octave by the
 official image's digest and the MATPOWER release zip by SHA-256
 (`tool-configs/matpower/Dockerfile`), the gcc image by digest and the
 SuiteSparse and p3s source tarballs by SHA-256 (`tool-configs/p3s/Dockerfile`),
+NVIDIA's CUDA devel image by digest and the cuDSS, lightsim2grid sdist and
+gpusim2grid tarballs by SHA-256 (`tool-configs/gpusim2grid/Dockerfile`),
 the Maven and JRE images by digest and every jar of a Java library by
 SHA-256 (`tool-configs/*/jars.sha256`, checked by
 `docker/java-tool.dockerfile`; its pom pins versions at least 7 days old),

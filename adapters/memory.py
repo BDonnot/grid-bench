@@ -48,16 +48,23 @@ def _child(tool: str, case: str, operation: str) -> dict:
 
     adapter = get(tool, CASES[case]["problem"])
     for name in adapter.modules:
-        import_module(name)
+        try:
+            import_module(name)
+        except Exception as e:
+            # Re-raised as a plain exception, since the parent unpickles what
+            # the child raises: a tool's own exception type can need the tool
+            # to unpickle (juliacall's JuliaError starts Julia in the pool's
+            # result thread, which hangs: exapf_gpu without a usable GPU).
+            raise RuntimeError(f"{type(e).__name__}: {e}") from None
     pid = adapter.tool_pid() or "self"
     Path(f"/proc/{pid}/clear_refs").write_text("5")   # reset VmHWM to current RSS
     out = {"rss_baseline_mb": _status_mb("VmRSS", pid)}
     if operation == "validate":
         adapter.validate(case)
         return out | {"rss_validate_mb": _status_mb("VmHWM", pid)}
-    model = adapter.load(case)
-    out["rss_import_mb"] = _status_mb("VmHWM", pid)
     try:
+        model = adapter.load(case)
+        out["rss_import_mb"] = _status_mb("VmHWM", pid)
         if isinstance(adapter, SolvingAdapter):
             adapter.solve(model)
             out["rss_solve_mb"] = _status_mb("VmHWM", pid)
@@ -65,7 +72,7 @@ def _child(tool: str, case: str, operation: str) -> dict:
             with tempfile.TemporaryDirectory() as out_dir:
                 adapter.export(model, Path(out_dir))
                 out["rss_export_mb"] = _status_mb("VmHWM", pid)
-    except Exception:  # noqa: BLE001 - the solve/export test records why; here only memory matters
+    except Exception:  # noqa: BLE001 - the import, solve and export tests record why; here only memory matters
         pass
     return out
 

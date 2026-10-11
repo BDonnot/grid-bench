@@ -96,6 +96,21 @@ def graded(case: str) -> bool:
     return c["format"] == "matpower" or "source_case" in c
 
 
+def gpu(meta: dict) -> str | None:
+    """The device a tool ran on, if a GPU (`dependencies.gpu`, recorded by its adapter)."""
+    return meta.get("dependencies", {}).get("gpu")
+
+
+def gpu_run(res: Results) -> tuple[list[str], list[str], list[str]]:
+    """Of a GPU results directory (power flow, batch and N-1): the GPU tools,
+    the CPU baselines run next to them, and the devices, in registry order."""
+    parts = [p for p in (res, res.batch, res.n1) if p]
+    tools = {t: m for p in parts for t, m in p.tools.items()}
+    order = list(dict.fromkeys(t for p in parts for t in p.tool_order()))
+    return ([t for t in order if gpu(tools[t])], [t for t in order if not gpu(tools[t])],
+            list(dict.fromkeys(gpu(tools[t]) for t in order if gpu(tools[t]))))
+
+
 def reads(res: Results, tool: str, case: str) -> bool:
     return CASES[case]["family"] in res.tools[tool]["families"]
 
@@ -164,7 +179,7 @@ def load(directory: Path) -> Results:
     each, with that problem's settings."""
     res = Results(se=Results(), opf=Results(), batch=Results(), n1=Results(), cim=Results())
     for path in sorted(Path(directory).glob("*.json")):
-        if path.name == "conversion.json":
+        if path.name == "conversion.json":   # the conversion check's local record, not results
             continue
         data = json.loads(path.read_text())
         if "grid_bench" not in data:
