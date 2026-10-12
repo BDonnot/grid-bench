@@ -40,6 +40,8 @@ class Results:
     opf: "Results | None" = None
     batch: "Results | None" = None
     n1: "Results | None" = None
+    dc: "Results | None" = None
+    dcn1: "Results | None" = None
     cim: "Results | None" = None
 
     def get(self, tool: str, case: str, operation: str, threads: int | None = None) -> Record | None:
@@ -87,6 +89,8 @@ def input_label(case: str) -> str:
     c = CASES[case]
     if "converter" in c:
         return f"CGMES ({c['converter']})"
+    if c.get("outages") == "all":
+        return "`.m`, all outages"
     return "CGMES" if c["format"] == "cgmes" else "`.m`"
 
 
@@ -175,9 +179,10 @@ def load(directory: Path) -> Results:
     (outside them) stays in its JSON but out of the published reports.
     Power flow at the top level, state estimation in `.se`, optimal power
     flow in `.opf`, batch power flow in `.batch`, N-1 contingencies in
-    `.n1`, CIM import/export/validation in `.cim`: a tool has an entry in
+    `.n1`, DC power flow in `.dc`, DC N-1 in `.dcn1`, CIM import/export/validation in `.cim`: a tool has an entry in
     each, with that problem's settings."""
-    res = Results(se=Results(), opf=Results(), batch=Results(), n1=Results(), cim=Results())
+    res = Results(se=Results(), opf=Results(), batch=Results(), n1=Results(), dc=Results(), dcn1=Results(),
+                  cim=Results())
     for path in sorted(Path(directory).glob("*.json")):
         if path.name == "conversion.json":   # the conversion check's local record, not results
             continue
@@ -204,7 +209,8 @@ def load(directory: Path) -> Results:
 
 
 def _problem(res: Results, problem: str) -> Results:
-    return {"pf": res, "se": res.se, "opf": res.opf, "batch": res.batch, "n1": res.n1, "cim": res.cim}[problem]
+    return {"pf": res, "se": res.se, "opf": res.opf, "batch": res.batch, "n1": res.n1, "dc": res.dc, "dcn1": res.dcn1,
+            "cim": res.cim}[problem]
 
 
 def _part(res: Results, case: str) -> Results:
