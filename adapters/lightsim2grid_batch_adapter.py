@@ -19,7 +19,7 @@ not). Scenario values go to the loads by MATPOWER bus number and to the
 generators by gen row; offline generators keep their own P.
 
 Settings:
-- `change_algorithm(NR_KLU)`, as in the power-flow adapter.
+- `change_algorithm(NRSing_KLU)`, as in the power-flow adapter.
 - `modify_gen_p`, `modify_load_p`, `modify_load_q` (scenarios x elements;
   no static generators), then `compute(v_init, MAX_ITERATIONS,
   tolerance(grid))` with `v_init` the power-flow adapter's flat start, and
@@ -89,7 +89,7 @@ class Lightsim2gridBatch(BatchAdapter):
         gen_p, load_p, load_q, number = injections(case, grid)
         n = len(gen_p)
         computer = InjectionSweepCPP(grid)
-        computer.change_algorithm(AlgorithmType.NR_KLU)
+        computer.change_algorithm(AlgorithmType.NRSing_KLU)
         computer.init_from_n_powerflow = True
         computer.modify_gen_p(gen_p)
         computer.modify_sgen_p(np.zeros((n, 0)))

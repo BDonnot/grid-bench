@@ -11,8 +11,10 @@ importer of its own (only via pypowsybl's, which would benchmark that
 importer instead), so the cgmes family is not run.
 
 Settings:
-- `AlgorithmType.NR_KLU`: Newton-Raphson on KLU, lightsim2grid's fastest
-  generally available AC solver.
+- `AlgorithmType.NRSing_KLU`: Newton-Raphson on KLU with a single slack,
+  the common problem. The default `NR_KLU` is the distributed-slack Newton,
+  which carries the slack's share as an extra unknown even with one slack
+  bus; not used, as it solves a larger system than the problem needs.
 - `ac_pf(v_init, MAX_ITERATIONS, tolerance(grid))` with `v_init` all 1.0 p.u.
   and zero angle: a flat start on every solve. lightsim2grid applies PV/slack
   setpoints itself. An empty returned vector means divergence.
@@ -49,14 +51,14 @@ class Lightsim2gridAdapter(SolverAdapter):
     modules = ("lightsim2grid", "lightsim2grid.network", "lightsim2grid.algorithm")
     language = "c++"
     families = ("matpower", "distribution")
-    settings = {"algorithm": "NR_KLU", "init": "flat", "tolerance_pu": TOLERANCE_PU, "tolerance_unit": "MVA (tol = tolerance_pu * sn_mva)",
+    settings = {"algorithm": "NRSing_KLU", "init": "flat", "tolerance_pu": TOLERANCE_PU, "tolerance_unit": "MVA (tol = tolerance_pu * sn_mva)",
                 "max_iteration": MAX_ITERATIONS, "build": "sdist, gcc 12, -O3 -funroll-loops -ffast-math, no -march=native"}
 
     def load(self, case):
         from lightsim2grid.algorithm import AlgorithmType
         from lightsim2grid.network import init_from_matpower
         grid = init_from_matpower(str(mat_path(case)))
-        grid.change_algorithm(AlgorithmType.NR_KLU)
+        grid.change_algorithm(AlgorithmType.NRSing_KLU)
         n = len(grid.get_bus_vn_kv())
         return {"grid": grid, "v_init": np.full(n, grid.get_init_vm_pu(), dtype=complex), "tol": tolerance(grid), "v": None}
 

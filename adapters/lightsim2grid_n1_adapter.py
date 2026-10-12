@@ -7,7 +7,7 @@ threads (contiguous ranges of the list, each thread with its own solver).
 Driven without grid2op, as the power-flow adapter drives `ac_pf`.
 
 Settings:
-- `change_algorithm(NR_KLU)`, as in the power-flow adapter.
+- `change_algorithm(NRSing_KLU)`, as in the power-flow adapter.
 - `init_from_n_powerflow=True`: `compute` first solves the base case from
   the `v_init` it is given (the power-flow adapter's flat start) and starts
   every outage from that solution: the problem's base-case start, base solve
@@ -78,7 +78,7 @@ class Lightsim2gridN1(ContingencyAdapter):
         ids, number = contingency_ids(case, grid)
 
         computer = ContingencyAnalysisCPP(grid)
-        computer.change_algorithm(AlgorithmType.NR_KLU)
+        computer.change_algorithm(AlgorithmType.NRSing_KLU)
         computer.init_from_n_powerflow = True
         computer.add_multiple_n1([int(i) for i in ids])
         order = [d for d in computer.my_defaults()]
