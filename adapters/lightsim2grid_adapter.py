@@ -13,9 +13,16 @@ importer instead), so the cgmes family is not run.
 Settings:
 - `AlgorithmType.NR_KLU`: Newton-Raphson on KLU, lightsim2grid's fastest
   generally available AC solver.
-- `ac_pf(v_init, MAX_ITERATIONS, TOLERANCE_PU)` with `v_init` all 1.0 p.u.
+- `ac_pf(v_init, MAX_ITERATIONS, tolerance(grid))` with `v_init` all 1.0 p.u.
   and zero angle: a flat start on every solve. lightsim2grid applies PV/slack
   setpoints itself. An empty returned vector means divergence.
+- `tolerance(grid)` = `TOLERANCE_PU * sn_mva`: `ac_pf` compares the infinity
+  norm of its mismatch with `tol` in MVA, not per unit (measured: the
+  smallest `tol` at which Newton stops after k iterations equals the
+  oracle's MVA mismatch at that iterate, on case14 and case300). Passing
+  `TOLERANCE_PU` itself asked for 1e-10 p.u. at 100 MVA, 100 times the
+  common tolerance, and one extra iteration on case9241pegase, mvlv10616
+  and case2848rte.
 - No reactive limits or controls: `ac_pf` has none to switch off.
 """
 import numpy as np
@@ -23,6 +30,12 @@ import numpy as np
 from adapters.solver_adapter import MAX_ITERATIONS, TOLERANCE_PU, DidNotConverge, Solution, SolverAdapter
 from cases.matpower import BUS_I, parse_m
 from cases.registry import CASES, mat_path
+
+
+def tolerance(grid) -> float:
+    """`TOLERANCE_PU` in the unit lightsim2grid's `tol` is in (MVA; see the
+    module docstring). Shared with the batch and N-1 adapters."""
+    return TOLERANCE_PU * grid.get_sn_mva()
 
 
 class Lightsim2gridAdapter(SolverAdapter):
@@ -33,7 +46,8 @@ class Lightsim2gridAdapter(SolverAdapter):
     modules = ("lightsim2grid", "lightsim2grid.network", "lightsim2grid.algorithm")
     language = "c++"
     families = ("matpower", "distribution")
-    settings = {"algorithm": "NR_KLU", "init": "flat", "tolerance_pu": TOLERANCE_PU, "max_iteration": MAX_ITERATIONS}
+    settings = {"algorithm": "NR_KLU", "init": "flat", "tolerance_pu": TOLERANCE_PU, "tolerance_unit": "MVA (tol = tolerance_pu * sn_mva)",
+                "max_iteration": MAX_ITERATIONS}
 
     def load(self, case):
         from lightsim2grid.algorithm import AlgorithmType
@@ -41,10 +55,10 @@ class Lightsim2gridAdapter(SolverAdapter):
         grid = init_from_matpower(str(mat_path(case)))
         grid.change_algorithm(AlgorithmType.NR_KLU)
         n = len(grid.get_bus_vn_kv())
-        return {"grid": grid, "v_init": np.full(n, grid.get_init_vm_pu(), dtype=complex), "v": None}
+        return {"grid": grid, "v_init": np.full(n, grid.get_init_vm_pu(), dtype=complex), "tol": tolerance(grid), "v": None}
 
     def solve(self, model):
-        v = model["grid"].ac_pf(model["v_init"], MAX_ITERATIONS, TOLERANCE_PU)
+        v = model["grid"].ac_pf(model["v_init"], MAX_ITERATIONS, model["tol"])
         if v.shape[0] == 0:
             raise DidNotConverge("ac_pf returned an empty voltage vector")
         model["v"] = v
