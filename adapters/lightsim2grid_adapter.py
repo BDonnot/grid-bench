@@ -24,6 +24,9 @@ Settings:
   common tolerance, and one extra iteration on case9241pegase, mvlv10616
   and case2848rte.
 - No reactive limits or controls: `ac_pf` has none to switch off.
+- Built from its sdist with p3s's flags (tool-configs/lightsim2grid/Dockerfile),
+  not the PyPI wheel: the same compiler and optimisation as the other
+  C++/KLU Newton solver here, so the two columns differ by their code only.
 """
 import numpy as np
 
@@ -47,7 +50,7 @@ class Lightsim2gridAdapter(SolverAdapter):
     language = "c++"
     families = ("matpower", "distribution")
     settings = {"algorithm": "NR_KLU", "init": "flat", "tolerance_pu": TOLERANCE_PU, "tolerance_unit": "MVA (tol = tolerance_pu * sn_mva)",
-                "max_iteration": MAX_ITERATIONS}
+                "max_iteration": MAX_ITERATIONS, "build": "sdist, gcc 12, -O3 -funroll-loops -ffast-math, no -march=native"}
 
     def load(self, case):
         from lightsim2grid.algorithm import AlgorithmType
