@@ -71,6 +71,8 @@ class TripletsCim(CimAdapter):
 
     def validate(self, case):
         from triplets.export_schema import schemas
+        # an empty glob would validate against nothing, silently
+        assert CIM_SHAPES, "no SHACL shapes: is data/application-profiles-library checked out?"
         found = self.load(case).shacl.validate([str(p) for p in CIM_SHAPES], rdf_map=schemas.ENTSOE_CGMES_3_0_0_552_ED1)
         return {"violations": len(found), "by_severity": dict(Counter(found["SEVERITY"]))}
 

@@ -53,6 +53,8 @@ class OpencgmesCim(CimAdapter):
                 "rules": "ENTSO-E CGMES 3.0 SHACL (CIM_SHAPES)", "jvm_heap": jvm.HEAP}
 
     def __init__(self):
+        # an empty glob would parse without profiles and validate against nothing, silently
+        assert RDFS and CIM_SHAPES, "no CGMES RDFS or SHACL: is data/application-profiles-library checked out?"
         jvm.start()
         from de.soptim.opencgmes.cimxml.parser import CimXmlParser
         from java.nio.file import Paths
